@@ -1,13 +1,288 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caravan Chronicle: Citizen Access</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the circus/caravan theme */
+        :root {
+            --primary: #C0392B; /* Deep Red */
+            --secondary: #F39C12; /* Golden Orange */
+            --background: #ECF0F1; /* Light Gray */
+            --text: #2C3E50; /* Dark Blue/Gray */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card {
+            background-color: white;
+            border-top: 5px solid var(--primary);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 0 15px rgba(192, 57, 43, 0.2);
+        }
+        .btn-primary {
+            background-color: var(--primary);
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            background-color: #A93226;
+            transform: translateY(-1px);
+        }
+        .input-style {
+            border: 2px solid #DCDCDC;
+            padding: 10px;
+            transition: border-color 0.2s;
+        }
+        .input-style:focus {
+            border-color: var(--secondary);
+            outline: none;
+        }
+        /* Style for the message box, replacing alert() */
+        #messageBox {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body class="p-4">
+
+    <!-- Message Box for Feedback (Replaces alert()) -->
+    <div id="messageBox"></div>
+
+    <!-- Main Content Container -->
+    <div id="appContainer" class="w-full max-w-lg">
+
+        <!-- Header -->
+        <h1 class="text-4xl font-extrabold text-center mb-6 text-gray-800">
+            The Caravan Chronicle
+        </h1>
+        <p class="text-center text-lg mb-8 text-gray-600">Citizen Access and Authentication</p>
+
+        <!-- Dynamic Content Area -->
+        <div id="authContent" class="card p-8 rounded-xl space-y-6">
+            <!-- Content will be injected here -->
+            <div id="loading" class="text-center text-gray-500">Loading authentication forms...</div>
+        </div>
+
+        <!-- User Info & Logout (Hidden until logged in) -->
+        <div id="userInfo" class="mt-8 p-6 bg-white rounded-xl shadow-lg hidden">
+            <p class="text-lg font-semibold mb-3">Welcome Back, <span id="userName" class="text-primary"></span>!</p>
+            <p class="text-sm text-gray-600 mb-4">Your current role: <span id="userRole" class="font-bold"></span></p>
+            <button id="logoutBtn" class="w-full btn-primary text-white py-2 rounded-lg font-semibold shadow-md">
+                Logout
+            </button>
+        </div>
+        
+    </div>
+
+<script>
+    // --- Configuration ---
+    // NOTE: You must change the BASE_URL to the address where your Express server is running
+    const BASE_URL = 'http://localhost:5000/api/auth'; 
+
+    // --- Utility Functions ---
+
+    /** Displays a notification message to the user */
+    function showMessage(text, type = 'success') {
+        const messageBox = document.getElementById('messageBox');
+        const alertClass = type === 'error' 
+            ? 'bg-red-500 border-red-700' 
+            : 'bg-green-500 border-green-700';
+        
+        const message = document.createElement('div');
+        message.className = `p-4 mb-2 text-white rounded-lg shadow-xl ${alertClass} transition-opacity duration-300`;
+        message.textContent = text;
+        
+        messageBox.prepend(message); // Show latest message at the top
+
+        // Auto-remove the message after 4 seconds
+        setTimeout(() => {
+            message.style.opacity = '0';
+            message.addEventListener('transitionend', () => message.remove());
+        }, 4000);
+    }
+    
+    /** Handles the network request to the backend */
+    async function postData(url, data) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (!response.ok) {
+                // If response is 4xx or 5xx, throw the message from the backend
+                throw new Error(result.message || `HTTP error! Status: ${response.status}`);
+            }
+            return result;
+        } catch (error) {
+            showMessage(error.message, 'error');
+            throw error; // Re-throw to be handled by the caller
+        }
+    }
+
+    // --- State and View Management ---
+    
+    /** Checks if a JWT token is present in local storage */
+    function isAuthenticated() {
+        return localStorage.getItem('token') !== null;
+    }
+
+    /** Renders the registration form HTML */
+    function renderRegisterForm() {
+        const content = document.getElementById('authContent');
+        content.innerHTML = `
+            <h2 class="text-2xl font-bold text-center text-primary mb-6">New Citizen Registration</h2>
+            <form id="registerForm" class="space-y-4">
+                <input type="text" id="regUsername" placeholder="Username" required class="w-full input-style rounded-md" />
+                <input type="email" id="regEmail" placeholder="Email Address" required class="w-full input-style rounded-md" />
+                <input type="password" id="regPassword" placeholder="Password" required class="w-full input-style rounded-md" />
+                <button type="submit" class="w-full btn-primary text-white py-2 rounded-lg font-semibold shadow-md">
+                    Join the Caravan
+                </button>
+            </form>
+            <p class="text-center text-sm mt-4">Already registered? <a href="#" id="showLogin" class="text-secondary font-semibold hover:underline">Log in here</a></p>
+        `;
+
+        document.getElementById('showLogin').addEventListener('click', (e) => {
+            e.preventDefault();
+            renderLoginForm();
+        });
+
+        document.getElementById('registerForm').addEventListener('submit', handleRegister);
+    }
+
+    /** Renders the login form HTML */
+    function renderLoginForm() {
+        const content = document.getElementById('authContent');
+        content.innerHTML = `
+            <h2 class="text-2xl font-bold text-center text-secondary mb-6">Citizen Login</h2>
+            <form id="loginForm" class="space-y-4">
+                <input type="email" id="loginEmail" placeholder="Email Address" required class="w-full input-style rounded-md" />
+                <input type="password" id="loginPassword" placeholder="Password" required class="w-full input-style rounded-md" />
+                <button type="submit" class="w-full btn-primary text-white py-2 rounded-lg font-semibold shadow-md">
+                    Enter the Gates
+                </button>
+            </form>
+            <p class="text-center text-sm mt-4">New to the city? <a href="#" id="showRegister" class="text-primary font-semibold hover:underline">Register here</a></p>
+        `;
+
+        document.getElementById('showRegister').addEventListener('click', (e) => {
+            e.preventDefault();
+            renderRegisterForm();
+        });
+
+        document.getElementById('loginForm').addEventListener('submit', handleLogin);
+    }
+
+    /** Renders the User Dashboard Shell after successful login */
+    function renderDashboardShell(user, token) {
+        document.getElementById('authContent').classList.add('hidden');
+        const userInfoDiv = document.getElementById('userInfo');
+        
+        document.getElementById('userName').textContent = user.username;
+        document.getElementById('userRole').textContent = user.role;
+        userInfoDiv.classList.remove('hidden');
+
+        // This is the shell for Phase 2/3 work!
+        userInfoDiv.insertAdjacentHTML('beforeend', `
+            <div id="citizenFeatures" class="mt-6 pt-4 border-t border-gray-200 space-y-3">
+                <h3 class="text-xl font-bold text-gray-700">Citizen Portal Features:</h3>
+                <p class="p-3 bg-blue-50 border-l-4 border-blue-500 rounded-lg font-medium text-blue-800">
+                    Your Authentication is complete! Next, we implement:
+                </p>
+                <button onclick="showMessage('This will be the start of Phase 2: The Citizen Portal (History, Profile, etc.)')" class="w-full text-left p-3 rounded-lg border border-gray-300 hover:bg-gray-100 transition duration-150">
+                    👤 My Profile & Settings
+                </button>
+                <button onclick="showMessage('This will be the start of Phase 3: The Location Verification and Complaint Form!')" class="w-full text-left p-3 rounded-lg border border-gray-300 hover:bg-gray-100 transition duration-150">
+                    🚨 Submit New Complaint
+                </button>
+                <button onclick="showMessage('This will be the start of Phase 2: Tracking My Submissions.')" class="w-full text-left p-3 rounded-lg border border-gray-300 hover:bg-gray-100 transition duration-150">
+                    📜 View Complaint History
+                </button>
+            </div>
+        `);
+    }
+
+    // --- Handlers ---
+
+    async function handleRegister(e) {
+        e.preventDefault();
+        const username = document.getElementById('regUsername').value;
+        const email = document.getElementById('regEmail').value;
+        const password = document.getElementById('regPassword').value;
+
+        try {
+            await postData(`${BASE_URL}/register`, { username, email, password });
+            showMessage('Registration successful! Please log in.', 'success');
+            renderLoginForm();
+        } catch (error) {
+            // Error handled by postData
+        }
+    }
+
+    async function handleLogin(e) {
+        e.preventDefault();
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+
+        try {
+            const result = await postData(`${BASE_URL}/login`, { email, password });
+            
+            // Store the token and user data
+            localStorage.setItem('token', result.token);
+            localStorage.setItem('user', JSON.stringify(result.user));
+            
+            showMessage(result.message, 'success');
+            
+            // Render the dashboard view
+            renderDashboardShell(result.user, result.token);
+
+        } catch (error) {
+            // Error handled by postData
+        }
+    }
+
+    function handleLogout() {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        showMessage('Logged out successfully.', 'success');
+        // Reset view
+        document.getElementById('userInfo').classList.add('hidden');
+        document.getElementById('authContent').classList.remove('hidden');
+        document.getElementById('authContent').innerHTML = ''; // Clear features
+        renderLoginForm();
+    }
+
+    // --- Initialization ---
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('loading').remove();
+        
+        if (isAuthenticated()) {
+            const user = JSON.parse(localStorage.getItem('user'));
+            renderDashboardShell(user, localStorage.getItem('token'));
+        } else {
+            renderLoginForm();
+        }
+        
+        document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+    });
+</script>
+
+</body>
 </html>

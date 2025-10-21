@@ -1,10 +1,164 @@
+import asyncHandler from "../utils/asyncHandler.js";
+import ApiError from "../utils/ApiError.js"
+import { User } from "../models/userModel.js"; // User is directly connect with db
+import ApiResponse from "../utils/ApiResponse.js";
 
-export const Login = async(req,res)=>{
-    const {username, email, password} = req.body;
-    console.log("login");
-    res.json({"status":"true"});
+
+// function for generate access and refresh token while login
+const generateAccessAndRefreshToken = async (userId) =>{
+    try {
+        const  userToken = await User.findById(userId);
+        const accessToken = userToken.generateAccessToken();
+        const refreshToken = userToken.generateRefreshToken();
+// access token hum user ko de dete h
+// but refresh token ko hum db me bhi rakhte h
+
+        userToken.refreshToken = refreshToken;
+        await userToken.save({validateBeforeSave: false}); // to save the refresh token
+
+        return {accessToken , refreshToken};
+
+    } catch (error) {
+        throw new ApiError(500 , "Something went wrong while generating access and refresh token");
+    }
 }
-export const register = async(req,res)=>{
-    console.log("register");
-    res.json({"status":"true"});
-}
+
+// web request ke liye asyncHandler ka use krenge
+
+const registerUser = asyncHandler( async (req,res) =>{
+    // what we need for register user
+
+    // first we need user detail(depend on userModel) for sure (from frontened)
+    // second we will check for validation of credentials of user
+    // some steps come here when we also need photo or videos
+    // third check if user already exist or not (userName , email)
+    // fourth create user object to create entry in db
+    // 5 remove password from response to frontened
+    // 6 check if response or user creation
+    // return res or send err
+
+    // 1....
+    const {userName , email, password , role} = req.body;
+        console.log("email" , email);
+
+    // 2...validation
+    if(
+        [userName , email , password , role].some((field)=> field.trim()=== "")
+    )
+    {
+        throw new ApiError(400 , "All fields are required");
+    }
+
+     // Simple regex for email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!email || !emailRegex.test(email)) {
+        throw new ApiError(400 , "Invalid email format");
+    }
+    
+    // 3......... user already exist or not
+    const existedUser = await User.findOne({
+        $or: [{ userName } , { email }]
+    })
+    if(existedUser){
+        throw new ApiError(409 , "User witn username or email already exist"); 
+        // agr ApiiError n hota to baar baar res.status().json({}) likhna padta
+    }
+
+    // 4........ create user object- entry in db
+    // db se baat bs User kr rha h
+    const newUser = await User.create({
+        userName: userName.toLowerCase(),
+        email,
+        password,
+        role: role || 'Citizen' // Default to 'Citizen' if role is not supplied
+    })
+    // 5......
+    const createdUser = await User.findById(newUser._id).select(
+        "-password" // yaha vo likhte h jo frontened me nhi dikhana hota
+    )
+    if(!createdUser){
+        throw new ApiError(500, "Something went wrong while registering the user");
+    }
+
+    // 6.......
+    return res.status(201).json(
+        new ApiResponse(200 , createdUser , "User registered successfully")
+    )
+
+});
+
+
+const LoginUser = asyncHandler( async(req,res)=>{
+    // login krte smy we will use refresh and access token
+
+    // FIRST take the user credentials like email and passwrod from req.body
+    // second.. verify the user credentials {email or username}
+    // third.. find the user
+    // fourth password check
+    // fifth generate access and refresh token
+    // sixth send the token in cookies
+
+    // 1..
+    const {userName , email, password} = req.body;
+
+    // 2......
+    if(!userName || !email){
+        throw new ApiError(400 , "username or email is required");
+    }
+
+    // 3......
+    const user = await User.findOne(
+        {
+            $or: [{userName} , {email}]
+        }
+    )
+ 
+    if(!user){
+        throw new ApiError(404 , "user does not exist");
+    }
+
+    // 4...  bcrypt will help to verify the password
+    const isPasswordValid = await user.isPasswordCorret(password)
+    if(!isPasswordValid){
+        throw new ApiError(401 , "passsword is not correct");
+    }
+
+    // 5..... access and refresh token
+    const {accessToken , refreshToken} = await generateAccessAndRefreshToken(user._id);
+
+    // 6..... cookies
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
+
+    const options = {
+        httpOnly: true,
+        secure: true,   // done so that only server can modify the cookies
+    }
+
+    return res.status(200)
+    .cookie("accessToken" , accessToken , options)
+    .cookie("refreshToken" , refreshToken , options)
+    .json(
+        new ApiResponse(
+            200,
+            {
+                user: loggedInUser, accessToken,refreshToken
+            },
+            "User logged in successfully"
+        )
+    )
+} );
+
+
+// logout......
+
+const logoutUser = asyncHandler(async(req,res)=>{
+    // cookies and refresh token ko remove krna h
+    // pr ye kis user se lena h mtlb user id nhi h abhi 
+    // we will need a middleware here (design by ourself)
+    
+    
+})
+
+
+export  {LoginUser,registerUser}
