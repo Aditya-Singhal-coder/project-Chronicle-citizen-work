@@ -2,8 +2,7 @@ import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/ApiError.js"
 import { User } from "../models/userModel.js"; // User is directly connect with db
 import ApiResponse from "../utils/ApiResponse.js";
-import jwt from "jsonwebtoken";
-import { use } from "react";
+import jwt from "jsonwebtoken"; 
 
 // function for generate access and refresh token while login
 const generateAccessAndRefreshToken = async (userId) =>{
@@ -243,10 +242,66 @@ const refresAccessToken = asyncHandler(async(req,res)=>{
 
 })
 
+const changeCurrentPassword = asyncHandler(async(req,res)=>{
+    // need old passwros
+    // get from body
+    const {oldPassword , newPassword} = req.body;
+    // fetch user based on oldPassword
+    // use req.user because we will use middleware to verify the user without having userId initially
+    const user = await User.findById(req.user?._id);
+    if(!user){
+        throw new ApiError(401 , "Invalid user");
+    }
+
+    // need to check that if oldPasword bu yser above is correct or not
+    // in userModel we have isPasswordCoreect.....give true or false
+    const isValidPassword = await user.isPasswordCorret(oldPassword);
+
+    if(!isValidPassword){
+        throw new ApiError(401 , "Invalid old password");
+    }
+
+    user.password = newPassword;
+    await user.save({validateBeforeSave: false});
+
+    return res.status(200)
+    .json(new ApiResponse(200, {}, "password changed successfully"))
+})
+
+const getCurrentUser = asyncHandler(async(req,res)=>{
+    return res.status(200)
+    .status(200, req.user, "current user fetched successfully")
+})
+
+const updateAccountDetail = asyncHandler(async(req,res)=>{
+    const {userName, email} = req.body;
+    if(!userName || !email){
+        throw new ApiError(400, "All fields are required");
+    }
+// update the thing so directlu use findByI
+    const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set:{
+                userName: userName,
+                email: email
+            }
+        },
+        {
+            new: true
+        }
+    ).select("-password")
+
+    return res.status(200)
+    .json( new ApiResponse(200, user, "Account details update successfully"));
+})
 
 export  {
     loginUser,
     registerUser,
     logoutUser,
-    refresAccessToken
+    refresAccessToken,
+    changeCurrentPassword,
+    getCurrentUser,
+    updateAccountDetail
 }

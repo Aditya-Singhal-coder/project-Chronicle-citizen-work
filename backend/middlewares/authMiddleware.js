@@ -20,7 +20,7 @@ export const verifyJwt = asyncHandler( async(req , res , next)=>{
         const user = await User.findById(decodedToken?._id).select("-password -refreshToken")
 
         if(!user){
-            // Token was valid, but user doesn't exist (e.g., account deleted)
+            // Token was valid, but user doesn't exist 
             throw new ApiError(401 , "Invalid Access Token: User not found")
         }
 
